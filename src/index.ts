@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 import TelegramBot from "node-telegram-bot-api";
-import { validateWallet } from "./service/apiService.js";
+import { validateWallet } from "./service/apiService.ts";
 import mongoose from "mongoose";
 import { MonitoringService } from "./service/monitoringService.ts";
 import User from "./models/UserModel.ts";
