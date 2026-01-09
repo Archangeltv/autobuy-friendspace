@@ -1,0 +1,37 @@
+{
+  "name": "autobuy-friendspace",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "nodemon --watch 'src/**/*.ts' --exec 'node --loader ts-node/esm' src/index.ts",
+    "start": "ts-node src/index.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Archangeltv/autobuy-friendspace.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/Archangeltv/autobuy-friendspace/issues"
+  },
+  "homepage": "https://github.com/Archangeltv/autobuy-friendspace#readme",
+  "description": "",
+  "devDependencies": {
+    "@types/mongoose": "^5.11.96",
+    "@types/node": "^25.0.3",
+    "@types/node-telegram-bot-api": "^0.64.13",
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "ethers": "^6.16.0",
+    "mongoose": "^9.1.2",
+    "node-telegram-bot-api": "^0.67.0"
+  }
+}
