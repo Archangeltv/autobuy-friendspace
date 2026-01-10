@@ -115,7 +115,11 @@ for (const item of data) {
                 metadata: item.metadata,
                 roomId: item.room.id 
             };
+        }  else {
+            console.log(`Room ${item.room.id} skipped, creator ${item.creator.address} does not match ${wallet}`)
         }
+    } else {
+        console.log(`Room ${item.room.id} skipped, already seen`)
     }
 }
 return null; 
