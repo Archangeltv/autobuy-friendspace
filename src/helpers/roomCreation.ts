@@ -62,12 +62,18 @@ interface RoomData {
     unique_holders: number;
 }
 
-const seenRooms = new Set<string>();
+const seenRoomsPerWallet = new Map<string, Set<string>>();
 
 const START_TIME = Date.now();
 
 const fetchNewRooms = async (wallet: string) => {
     console.log("Room running")
+    
+    if (!seenRoomsPerWallet.has(wallet)) {
+        seenRoomsPerWallet.set(wallet, new Set<string>());
+    }
+    const seenRooms = seenRoomsPerWallet.get(wallet)!;
+    
     try {
         if (!BASE_URL) {
             console.log("BASE_URL is not defined");
@@ -119,7 +125,7 @@ for (const item of data) {
             console.log(`Room ${item.room.id} skipped, creator ${item.creator.address} does not match ${wallet}`)
         }
     } else {
-        console.log(`Room ${item.room.id} skipped, already seen`)
+        console.log(`Room ${item.room.id} skipped, already seen by ${wallet}`)
     }
 }
 return null; 
