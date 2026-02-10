@@ -6,7 +6,6 @@ import { MonitoringService } from "./service/monitoringService.ts";
 import User from "./models/UserModel.ts";
 import { encrypt } from "./helpers/EncryptionHelper.ts";
 
-
 dotenv.config();
 
 
@@ -31,6 +30,10 @@ mongoose.connect(process.env.MONGODB_URI!).then(async () => {
 
   await MonitoringService.init(bot);
 });
+
+function isDbConnected(): boolean {
+  return mongoose.connection.readyState === 1;
+}
 
 
 interface UserSession {
@@ -62,31 +65,39 @@ function isValidWalletFormat(wallet: string): boolean {
 bot.onText(/\/add(?:\s+(.+))?/, async (msg, match) => {
   const chatId = msg.chat.id;
   const userId = msg.from?.id;
-  
-  if (!userId) return;
-
-  const userProfile = await User.findOne({ chatId: userId });
-
-  if (!userProfile || !userProfile.walletPk) {
-    await bot.sendMessage(
-      chatId, 
-      "⛔ **Access Denied**\n\n" +
-      "You have not set up a Private Key yet.\n" +
-      "I cannot buy shares without a wallet to sign transactions.\n\n" +
-      "👉 Use `/setkey <your_private_key>` to set it up first.",
-      { parse_mode: "Markdown" }
-    );
-    return; 
-  }
-
-  const wallet = match?.[1]?.trim();
-
-  if (!wallet) {
-    await bot.sendMessage(chatId, '❌ Please provide a wallet address:\n/add <wallet_address>');
-    return;
-  }
 
   try {
+    if (!userId) {
+      await bot.sendMessage(chatId, "❌ Error identifying user. Please try again.");
+      return;
+    }
+
+    if (!isDbConnected()) {
+      await bot.sendMessage(chatId, "⏳ Bot is still starting up or database is temporarily unavailable. Please try again in a few seconds.");
+      return;
+    }
+
+    const userProfile = await User.findOne({ chatId: userId });
+
+    if (!userProfile || !userProfile.walletPk) {
+      await bot.sendMessage(
+        chatId, 
+        "⛔ **Access Denied**\n\n" +
+        "You have not set up a Private Key yet.\n" +
+        "I cannot buy shares without a wallet to sign transactions.\n\n" +
+        "👉 Use `/setkey <your_private_key>` to set it up first.",
+        { parse_mode: "Markdown" }
+      );
+      return; 
+    }
+
+    const wallet = match?.[1]?.trim();
+
+    if (!wallet) {
+      await bot.sendMessage(chatId, '❌ Please provide a wallet address:\n/add <wallet_address>');
+      return;
+    }
+
     if (!isValidWalletFormat(wallet)) {
       await bot.sendMessage(chatId, '❌ Invalid wallet address format!');
       return;
@@ -94,7 +105,7 @@ bot.onText(/\/add(?:\s+(.+))?/, async (msg, match) => {
     const isValidInAPI = await validateWallet(wallet);
     
     if (isValidInAPI === null) {
-      await bot.sendMessage(chatId, '❌ Wallet not found in system!');
+      await bot.sendMessage(chatId, '❌ Wallet not found in system or service timed out!');
       return;
     }
 
@@ -113,11 +124,9 @@ bot.onText(/\/add(?:\s+(.+))?/, async (msg, match) => {
       `_Reply with a number (e.g., 5)_`,
       { parse_mode: "Markdown" }
     );
-
-
   } catch (error) {
     console.error('Error in /add command:', error);
-    await bot.sendMessage(chatId, '❌ An error occurred. Please try again.');
+    await bot.sendMessage(chatId, '❌ An error occurred while processing your request. Please try again later.');
   }
 });
 
@@ -126,30 +135,46 @@ bot.on('message', async (msg) => {
   const userId = msg.from?.id;
   const text = msg.text;
 
-  if (!userId || !text || text.startsWith('/')) return;
+  try {
+    if (!userId || !text || text.startsWith('/')) return;
 
-  const session = userSessions.get(userId);
-
-  if (session?.stage === 'awaiting_keys') {
-    const keyCount = parseInt(text);
-
-    if (isNaN(keyCount) || keyCount < 1) {
-      await bot.sendMessage(chatId, '❌ Please enter a valid number of keys (minimum 1).');
+    if (!isDbConnected()) {
+      // For general messages, we might not want to spam if DB is down, 
+      // but if they are in a session, we should inform them.
+      if (userSessions.has(userId)) {
+        await bot.sendMessage(chatId, "⏳ Database connection lost. Please try again in a few seconds.");
+      }
       return;
     }
 
-    await MonitoringService.addWallet(chatId, session.tempWallet!, session.tempTwitterUsername!, keyCount, bot);
+    const session = userSessions.get(userId);
 
-    await bot.sendMessage(
-      chatId,
-      `✅ **Monitoring Active**\n\n` +
-      `🐦 User: [@${session.tempTwitterUsername}](https://x.com/${session.tempTwitterUsername})\n` +
-      `💼 Wallet: \`${session.tempWallet}\`\n\n` +
-      `I am now watching for new rooms from this user.`,
-      { parse_mode: "Markdown" }
-    );
+    if (session?.stage === 'awaiting_keys') {
+      const keyCount = parseInt(text);
 
-    userSessions.delete(userId);
+      if (isNaN(keyCount) || keyCount < 1) {
+        await bot.sendMessage(chatId, '❌ Please enter a valid number of keys (minimum 1).');
+        return;
+      }
+
+      await MonitoringService.addWallet(chatId, session.tempWallet!, session.tempTwitterUsername!, keyCount, bot);
+
+      await bot.sendMessage(
+        chatId,
+        `✅ **Monitoring Active**\n\n` +
+        `🐦 User: [@${session.tempTwitterUsername}](https://x.com/${session.tempTwitterUsername})\n` +
+        `💼 Wallet: \`${session.tempWallet}\`\n\n` +
+        `I am now watching for new rooms from this user.`,
+        { parse_mode: "Markdown" }
+      );
+
+      userSessions.delete(userId);
+    }
+  } catch (error) {
+    console.error('Error in message handler:', error);
+    if (userId && userSessions.has(userId)) {
+      await bot.sendMessage(chatId, '❌ An error occurred. Your session might have expired or a service is down.');
+    }
   }
 });
 
@@ -158,14 +183,26 @@ bot.onText(/\/setkey (.+)/, async (msg, match) => {
   const userId = msg.from?.id;
   const rawKey = match?.[1]?.trim();
 
-  if (!userId || !rawKey) return;
-
-  if (!/^0x[a-fA-F0-9]{64}$/.test(rawKey) && !/^[a-fA-F0-9]{64}$/.test(rawKey)) {
-    await bot.sendMessage(chatId, "❌ Invalid Private Key format. It should be 64 hex characters.");
-    return;
-  }
-
   try {
+    if (!userId || !rawKey) {
+      if (!userId) {
+        await bot.sendMessage(chatId, "❌ Error identifying user.");
+      } else {
+        await bot.sendMessage(chatId, "❌ Please provide a private key:\n/setkey <your_private_key>");
+      }
+      return;
+    }
+
+    if (!isDbConnected()) {
+      await bot.sendMessage(chatId, "⏳ Bot is still starting up or database is temporarily unavailable. Please try again in a few seconds.");
+      return;
+    }
+
+    if (!/^0x[a-fA-F0-9]{64}$/.test(rawKey) && !/^[a-fA-F0-9]{64}$/.test(rawKey)) {
+      await bot.sendMessage(chatId, "❌ Invalid Private Key format. It should be 64 hex characters.");
+      return;
+    }
+
     const encryptedKey = encrypt(rawKey);
 
     await User.findOneAndUpdate(
@@ -176,14 +213,9 @@ bot.onText(/\/setkey (.+)/, async (msg, match) => {
 
     await bot.sendMessage(chatId, "✅ **Private Key Saved Securely!**\nI can now perform auto-buys for you.", { parse_mode: 'Markdown' });
     
-  
     bot.deleteMessage(chatId, msg.message_id).catch(() => {}); 
-
   } catch (error) {
     console.error("Save key error:", error);
-    await bot.sendMessage(chatId, "❌ Failed to save key.");
+    await bot.sendMessage(chatId, "❌ Failed to save key. Please make sure the key is correct and try again.");
   }
 });
-
-
-console.log("Bot is running...");
